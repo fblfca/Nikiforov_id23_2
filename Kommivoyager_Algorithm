@@ -1,0 +1,104 @@
+import numpy as np
+from sklearn.model_selection import ParameterGrid
+
+class AntColonyOptimization:
+    def __init__(self, distance_matrix, num_ants, num_iterations, alpha=1, beta=5, evaporation=0.5, quantity=100):
+        self.distance_matrix = distance_matrix
+        self.num_ants = num_ants
+        self.num_iterations = num_iterations
+        self.alpha = alpha
+        self.beta = beta
+        self.evaporation = evaporation
+        self.quantity = quantity
+        self.num_cities = len(distance_matrix)
+        self.pheromone = np.ones((self.num_cities, self.num_cities)) #Феромоны на каждый путь сначала единицы
+        self.precedence = 1 / (distance_matrix + np.diag([np.inf] * self.num_cities)) #Предпочтение к каждому городу обратно пропорционально дальности до города
+
+    def run(self):
+        best_route = None
+        best_distance = float('inf')
+
+        for _ in range(self.num_iterations):
+            all_routes = []
+            for _ in range(self.num_ants): #Обход каждым муравьем городов
+                route = [np.random.randint(self.num_cities)]
+                unvisited_cities = set(range(self.num_cities))
+                unvisited_cities.remove(route[0])
+
+                while unvisited_cities: #Пока есть непосещенные города, вычисляется вероятность выбора того или иного города на основе феромонов
+                    current_city = route[-1]
+                    probabilities = []
+                    for city in unvisited_cities:
+                        prob = (self.pheromone[current_city, city] ** self.alpha) * (self.precedence[current_city, city] ** self.beta) #Вычисление вероятности выбора
+                        probabilities.append((city, prob))
+
+                    probabilities = np.array(probabilities, dtype=[('city', int), ('prob', float)]) #Список кортежей с 2 позициями
+                    probabilities_sum = np.sum(probabilities['prob'])
+                    probabilities['prob'] /= probabilities_sum #Стандартизация
+                    next_city = np.random.choice(probabilities['city'], p=probabilities['prob']) #Выбор на основе вероятностей каждого города
+
+                    route.append(next_city)
+                    unvisited_cities.remove(next_city)
+
+                route.append(route[0])
+                all_routes.append(route)
+
+                route_distance = sum(self.distance_matrix[route[i], route[i + 1]] for i in range(self.num_cities)) #Вычисление длины маршрута
+                if route_distance < best_distance:
+                    best_distance = route_distance
+                    best_route = route
+
+            self.pheromone *= (1 - self.evaporation) #Обновление матрицы феромонов
+            for route in all_routes:
+                for i in range(self.num_cities):
+                    self.pheromone[route[i], route[i + 1]] += self.quantity / best_distance
+
+        return best_route, best_distance
+
+class GridSearchACO:
+    def __init__(self, distance_matrix):
+        self.distance_matrix = distance_matrix
+        self.best_params = None
+        self.best_distance = float('inf')
+
+    def search(self, param_grid):
+        for params in ParameterGrid(param_grid):
+            aco = AntColonyOptimization(
+                distance_matrix=self.distance_matrix,
+                num_ants=params['num_ants'],
+                num_iterations=params['num_iterations'],
+                alpha=params['alpha'],
+                beta=params['beta'],
+                evaporation=params['evaporation'],
+                quantity=params['quantity']
+            )
+            route, distance = aco.run()
+
+            if distance < self.best_distance:
+                self.best_distance = distance
+                self.best_params = params
+
+        return self.best_params, self.best_distance
+
+
+distance_matrix = np.array([
+    [0, 10, 15, 20, 15],
+    [10, 0, 35, 25, 44],
+    [15, 35, 0, 30, 1],
+    [20, 25, 30, 0, 333],
+    [15, 44, 1, 333, 0]
+])
+
+param_grid = {
+    'alpha': [1, 2, 3],
+    'beta': [2, 5, 7],
+    'evaporation': [0.1, 0.5, 0.9],
+    'quantity': [50, 100, 150],
+    'num_ants': [10, 20, 30],
+    'num_iterations': [50, 100, 150]
+}
+
+grid_search = GridSearchACO(distance_matrix)
+best_params, best_distance = grid_search.search(param_grid)
+print("Лучшие параметры:", best_params)
+print("Минимальная длина маршрута:", best_distance)
