@@ -3,16 +3,20 @@ from sklearn.model_selection import ParameterGrid
 from pydantic import BaseModel
 from typing import List, Tuple
 
+# Модель графа
 class Graph(BaseModel):
     nodes: List[int]
     edges: List[Tuple[int, int]]
 
+# Модель результата (маршрут и его длина)
 class PathResult(BaseModel):
     path: List[int]
     total_distance: float
 
+# Реализация алгоритма муравьиной колонии
 class AntColonyOptimization:
-    def __init__(self, graph: Graph, num_ants, num_iterations, alpha=1, beta=5, evaporation=0.5, quantity=100):
+    def __init__(self, graph: Graph, num_ants: int, num_iterations: int, alpha: float = 1, beta: float = 5, 
+                 evaporation: float = 0.5, quantity: float = 100):
         self.graph = graph
         self.num_ants = num_ants
         self.num_iterations = num_iterations
@@ -22,14 +26,15 @@ class AntColonyOptimization:
         self.quantity = quantity
         self.num_cities = len(graph.nodes)
         self.distance_matrix = self.create_distance_matrix()
-        self.pheromone = np.ones((self.num_cities, self.num_cities))  # Феромоны на каждый путь сначала единицы
-        self.precedence = 1 / (self.distance_matrix + np.diag([np.inf] * self.num_cities))  # Предпочтение к каждому городу обратно пропорционально дальности до города
+        self.pheromone = np.ones((self.num_cities, self.num_cities))  # Изначально феромоны = 1
+        self.precedence = 1 / (self.distance_matrix + np.diag([np.inf] * self.num_cities))  # Предпочтение обратно пропорционально расстоянию
 
     def create_distance_matrix(self):
+        # Создание матрицы расстояний: 1 для рёбер, бесконечность для отсутствующих связей
         matrix = np.full((self.num_cities, self.num_cities), np.inf)
         for i, j in self.graph.edges:
-            matrix[i-1, j-1] = 1  # Длина всех рёбер равна 1
-        np.fill_diagonal(matrix, 0)
+            matrix[i-1, j-1] = 1  # Единичная длина ребра
+        np.fill_diagonal(matrix, 0)  # Расстояние до себя = 0
         return matrix
 
     def run(self):
@@ -38,27 +43,31 @@ class AntColonyOptimization:
 
         for _ in range(self.num_iterations):
             all_routes = []
-            for _ in range(self.num_ants):  # Обход каждым муравьем городов
+            for _ in range(self.num_ants):
+                # Каждый муравей начинает со случайного города
                 route = [np.random.randint(self.num_cities)]
                 unvisited_cities = set(range(self.num_cities))
                 unvisited_cities.remove(route[0])
 
-                while unvisited_cities:  # Пока есть непосещенные города, вычисляется вероятность выбора того или иного города на основе феромонов
+                # Пока есть непосещённые города
+                while unvisited_cities:
                     current_city = route[-1]
                     probabilities = []
                     for city in unvisited_cities:
-                        prob = (self.pheromone[current_city, city] ** self.alpha) * (self.precedence[current_city, city] ** self.beta)  # Вычисление вероятности выбора
+                        # Вычисление вероятности перехода в город
+                        prob = (self.pheromone[current_city, city] ** self.alpha) * \
+                               (self.precedence[current_city, city] ** self.beta)
                         probabilities.append((city, prob))
 
-                    probabilities = np.array(probabilities, dtype=[('city', int), ('prob', float)])  # Список кортежей с 2 позициями
+                    probabilities = np.array(probabilities, dtype=[('city', int), ('prob', float)])
                     probabilities_sum = np.sum(probabilities['prob'])
 
                     if probabilities_sum == 0:
-                        # Если сумма вероятностей равна нулю, выбираем случайный город
+                        # Если вероятности нулевые, выбираем случайный город
                         next_city = np.random.choice(list(unvisited_cities))
                     else:
-                        probabilities['prob'] /= probabilities_sum  # Стандартизация
-                        next_city = np.random.choice(probabilities['city'], p=probabilities['prob'])  # Выбор на основе вероятностей каждого города
+                        probabilities['prob'] /= probabilities_sum  # Нормализация
+                        next_city = np.random.choice(probabilities['city'], p=probabilities['prob'])
 
                     route.append(next_city)
                     unvisited_cities.remove(next_city)
@@ -66,23 +75,27 @@ class AntColonyOptimization:
                 route.append(route[0])  # Возврат в начальный город
                 all_routes.append(route)
 
-                route_distance = len(route) - 1  # Длина маршрута (количество рёбер)
+                # Длина маршрута = количество рёбер
+                route_distance = len(route) - 1
                 if route_distance < best_distance:
                     best_distance = route_distance
                     best_route = route
 
-            self.pheromone *= (1 - self.evaporation)  # Обновление матрицы феромонов
+            # Обновление феромонов
+            self.pheromone *= (1 - self.evaporation)  # Испарение
             for route in all_routes:
                 for i in range(len(route) - 1):
                     self.pheromone[route[i], route[i + 1]] += self.quantity / best_distance
 
         return best_route, best_distance
 
+# Поиск по сетке для подбора гиперпараметров
 class GridSearchACO:
     def __init__(self, graph: Graph):
         self.graph = graph
         self.best_params = None
         self.best_distance = float('inf')
+        self.best_route = None  # Добавлено для хранения лучшего маршрута
 
     def search(self, param_grid):
         for params in ParameterGrid(param_grid):
@@ -97,36 +110,40 @@ class GridSearchACO:
             )
             route, distance = aco.run()
 
+            # Сохранение лучших параметров и маршрута
             if distance < self.best_distance:
                 self.best_distance = distance
                 self.best_params = params
+                self.best_route = route
 
-        return self.best_params, self.best_distance
+        return self.best_params, self.best_distance, self.best_route
 
 # Пример использования
 graph_data = {
     "graph": {
         "nodes": [1, 2, 3, 4],
-        "edges": [[1, 2], [2, 3], [3, 4], [1, 4]]
+        "edges": [[1, 2], [2, 4], [3, 4], [1, 4], [4, 3]]
     }
 }
 
 graph = Graph(**graph_data["graph"])
 
 param_grid = {
-    'alpha': [1, 2, 3],
-    'beta': [2, 5, 7],
+    'alpha': [2, 3],
+    'beta': [2, 5],
     'evaporation': [0.1, 0.5, 0.9],
-    'quantity': [50, 100, 150],
+    'quantity': [50, 100],
     'num_ants': [10, 20, 30],
-    'num_iterations': [50, 100, 150]
+    'num_iterations': [50]
 }
 
+# Запуск поиска по сетке
 grid_search = GridSearchACO(graph)
-best_params, best_distance = grid_search.search(param_grid)
+best_params, best_distance, best_route = grid_search.search(param_grid)
 
-# Преобразуем маршрут из индексов в номера узлов
-best_route_nodes = [graph.nodes[i] for i in range(len(graph.nodes))]  # Получаем лучший маршрут
+# Преобразование индексов маршрута в номера узлов
+best_route_nodes = [graph.nodes[i] for i in best_route]
 path_result = PathResult(path=best_route_nodes, total_distance=best_distance)
 
-print(path_result.model_dump_json())  # Выводим результат в формате JSON
+# Вывод результата в JSON
+print(path_result.model_dump_json())
