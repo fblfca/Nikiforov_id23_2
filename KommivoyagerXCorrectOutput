@@ -3,9 +3,11 @@ from sklearn.model_selection import ParameterGrid
 from pydantic import BaseModel
 from typing import List, Tuple
 
+
 class Graph(BaseModel):
     nodes: List[int]
     edges: List[Tuple[int, int]]
+
 
 class PathResult(BaseModel):
     path: List[int]
@@ -15,23 +17,24 @@ class AntColonyOptimization:
     def __init__(self, graph: Graph, num_ants: int, num_iterations: int, alpha: float = 1, beta: float = 5,
                  evaporation: float = 0.5, quantity: float = 100):
         self.graph = graph
-        self.num_ants = num_ants
-        self.num_iterations = num_iterations
-        self.alpha = alpha
-        self.beta = beta
-        self.evaporation = evaporation
-        self.quantity = quantity
-        self.num_cities = len(graph.nodes)
-        self.distance_matrix = self.create_distance_matrix()
-        self.pheromone = np.where(self.distance_matrix != np.inf, 1.0, 0.01)
-        self.precedence = 1 / (self.distance_matrix + np.diag([np.inf] * self.num_cities))
+        self.num_ants = num_ants  # Количество муравьёв
+        self.num_iterations = num_iterations  # Количество итераций
+        self.alpha = alpha  # Параметр, определяющий влияние феромона
+        self.beta = beta  # Параметр, определяющий влияние видимости (1/расстояние)
+        self.evaporation = evaporation  # Коэффициент испарения феромона
+        self.quantity = quantity  # Количество феромона, выделяемого муравьём
+        self.num_cities = len(graph.nodes)  # Количество узлов (городов) в графе
+        self.distance_matrix = self.create_distance_matrix()  # Матрица расстояний между узлами
+        self.pheromone = np.where(self.distance_matrix != np.inf, 1.0, 0.01)  # Матрица феромонов
+        self.precedence = 1 / (self.distance_matrix + np.diag([np.inf] * self.num_cities))  # Матрица видимости
 
     def create_distance_matrix(self):
+        # Создание матрицы расстояний между узлами
         matrix = np.full((self.num_cities, self.num_cities), np.inf)
         for i, j in self.graph.edges:
-            matrix[i-1, j-1] = 1
-            matrix[j-1, i-1] = 1  # Граф неориентированный
-        np.fill_diagonal(matrix, 0)
+            matrix[i-1, j-1] = 1  # Устанавливаем длину рёбер равной 1
+            matrix[j-1, i-1] = 1  # Граф неориентированный, поэтому симметричный
+        np.fill_diagonal(matrix, 0)  # Диагональные элементы (расстояние до самого себя) равны 0
         return matrix
 
     def run(self):
@@ -41,46 +44,47 @@ class AntColonyOptimization:
         for _ in range(self.num_iterations):
             all_routes = []
             for _ in range(self.num_ants):
-                route = [np.random.randint(self.num_cities)]
+                route = [np.random.randint(self.num_cities)]  # Начальный узел выбирается случайно
                 unvisited_cities = set(range(self.num_cities))
-                unvisited_cities.remove(route[0])
+                unvisited_cities.remove(route[0])  # Удаляем начальный узел из непосещённых
 
                 while unvisited_cities:
                     current_city = route[-1]
                     probabilities = []
                     for city in unvisited_cities:
                         if self.distance_matrix[current_city, city] != np.inf:
+                            # Вычисление вероятности выбора следующего узла
                             prob = (self.pheromone[current_city, city] ** self.alpha) * \
                                    (self.precedence[current_city, city] ** self.beta)
                             probabilities.append((city, prob))
 
                     if not probabilities:
-                        break
+                        break  # Если нет доступных путей, завершаем маршрут
 
                     probabilities = np.array(probabilities, dtype=[('city', int), ('prob', float)])
                     prob_sum = np.sum(probabilities['prob'])
                     if prob_sum > 0:
-                        probabilities['prob'] /= prob_sum
+                        probabilities['prob'] /= prob_sum  # Нормализация вероятностей
                         next_city = np.random.choice(probabilities['city'], p=probabilities['prob'])
                     else:
-                        next_city = probabilities['city'][0]
+                        next_city = probabilities['city'][0]  # Если все вероятности нулевые, выбираем первый доступный
 
                     route.append(next_city)
                     unvisited_cities.remove(next_city)
 
                 # Проверяем, что все города посещены (без возврата)
                 if not unvisited_cities and len(set(route)) == self.num_cities:
-                    route_distance = len(route)  # Длина = число узлов
+                    route_distance = len(route)  # Длина маршрута равна числу узлов
                     all_routes.append(route)
                     if route_distance < best_distance:
                         best_distance = route_distance
                         best_route = route
 
             if all_routes:
-                self.pheromone *= (1 - self.evaporation)
+                self.pheromone *= (1 - self.evaporation)  # Испарение феромона
                 for route in all_routes:
                     for i in range(len(route) - 1):
-                        self.pheromone[route[i], route[i + 1]] += self.quantity / best_distance
+                        self.pheromone[route[i], route[i + 1]] += self.quantity / best_distance  # Обновление феромона
 
         return best_route, best_distance if best_route else (None, float('inf'))
 
